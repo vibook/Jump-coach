@@ -1,3 +1,20 @@
 # Jump Coach Android
 
-Android Studio 없이 GitHub Actions에서 APK를 자동 생성하는 Android 프로젝트입니다.
+갤럭시에서 직접 설치할 수 있는 APK를 GitHub Actions로 자동 빌드하는 프로젝트입니다.
+
+## 기능
+- 카메라로 전신 확인
+- 제자리뛰기 다섯 번 자동 카운트
+- 천천히 “하나, 둘, 셋, 넷, 다섯” 구령
+- 오전 10시부터 오후 5시까지 매 정각 알림
+- 알림 시 “제자리 뛰기 하자!” TTS
+- 재부팅 후 알람 재등록
+
+## APK 받기
+GitHub 저장소의 **Actions** 탭에서 **Build Android APK** 워크플로가 완료되면,
+해당 실행 화면의 **Artifacts**에서 **jump-coach-apk**를 다운로드하세요.
+압축을 풀면 `app-debug.apk`가 있습니다.
+
+## 첫 실행
+카메라, 알림, 정확한 알람 권한을 허용하세요.
+동작 인식 모델은 인터넷에서 불러오기 때문에 카메라 운동 인식 기능은 인터넷 연결이 필요합니다.
