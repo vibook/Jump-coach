@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>점프 코치</title>
+<style>
+:root{--bg:#0f172a;--panel:#111827;--card:#1f2937;--text:#f9fafb;--muted:#cbd5e1;--green:#22c55e;--red:#ef4444}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,sans-serif}
+main{max-width:760px;margin:auto;padding:14px}h1{font-size:1.3rem;margin:4px 0 10px}.sub{color:var(--muted);font-size:.92rem;line-height:1.45;margin-bottom:10px}
+.stage{position:relative;background:#000;border-radius:16px;overflow:hidden;aspect-ratio:3/4;max-height:68vh}
+video,canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}canvas{pointer-events:none}
+.tag{position:absolute;background:#000a;padding:8px 11px;border-radius:999px;font-weight:700}#phase{left:10px;top:10px}#countbox{right:10px;top:10px}#fit{left:10px;bottom:10px}
+.controls{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}button{min-height:50px;border:0;border-radius:12px;font-size:1rem;font-weight:800}
+.primary{background:var(--green);color:#052e16}.secondary{background:var(--card);color:white}.danger{background:var(--red);color:white}.full{grid-column:1/-1}
+.status{margin-top:12px;background:var(--panel);border-radius:12px;padding:12px;line-height:1.45}.small{font-size:.85rem;color:var(--muted)}
+</style>
+</head>
+<body>
+<main>
+<h1>다섯 번 제자리뛰기 코치</h1>
+<div class="sub">전신이 화면에 들어오면 운동 시작 버튼이 켜집니다. 통증이 더 심해지면 바로 멈추세요.</div>
+<section class="stage">
+<video id="video" autoplay muted playsinline></video><canvas id="overlay"></canvas>
+<div class="tag" id="phase">대기 중</div><div class="tag" id="countbox"><span id="count">0</span> / 5</div><div class="tag" id="fit">전신 확인 전</div>
+</section>
+<section class="controls">
+<button id="cameraBtn" class="secondary">카메라 켜기</button>
+<button id="testBtn" class="secondary">구령 시험</button>
+<button id="startBtn" class="primary full" disabled>운동 시작</button>
+<button id="stopBtn" class="danger full" disabled>멈추기</button>
+</section>
+<section class="status"><strong id="message">먼저 카메라를 켜 주세요.</strong><div class="small" id="detail">머리부터 발까지 모두 보이게 휴대폰을 세워 두세요.</div></section>
+</main>
+<script type="module">
+import {FilesetResolver,PoseLandmarker,DrawingUtils} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/+esm";
+const $=id=>document.getElementById(id),video=$("video"),canvas=$("overlay"),ctx=canvas.getContext("2d");
+const cameraBtn=$("cameraBtn"),startBtn=$("startBtn"),stopBtn=$("stopBtn"),testBtn=$("testBtn"),countEl=$("count"),phaseEl=$("phase"),fitEl=$("fit"),messageEl=$("message"),detailEl=$("detail");
+let landmarker=null,running=false,active=false,lastVideo=-1,count=0,baseline=null,ys=[],airborne=false,lastJump=0,stable=0;
+const UP=.045,DOWN=.018,GAP=800;
+function setMsg(a,b=""){messageEl.textContent=a;detailEl.textContent=b}
+function speak(text,rate=.62){speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.lang="ko-KR";u.rate=rate;speechSynthesis.speak(u)}
+async function initPose(){if(landmarker)return;setMsg("동작 인식 모델을 준비하고 있어요…");const vision=await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm");landmarker=await PoseLandmarker.createFromOptions(vision,{baseOptions:{modelAssetPath:"https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task",delegate:"GPU"},runningMode:"VIDEO",numPoses:1,minPoseDetectionConfidence:.55,minPosePresenceConfidence:.55,minTrackingConfidence:.55})}
+async function startCamera(){try{await initPose();const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"user",width:{ideal:720},height:{ideal:1280}},audio:false});video.srcObject=stream;await video.play();canvas.width=video.videoWidth||720;canvas.height=video.videoHeight||1280;running=true;cameraBtn.disabled=true;setMsg("카메라가 켜졌어요.","전신이 잠시 안정적으로 보이면 시작 버튼이 켜집니다.");requestAnimationFrame(loop)}catch(e){console.error(e);setMsg("카메라를 켤 수 없어요.","카메라 권한을 허용하고 인터넷 연결을 확인해 주세요.")}}
+function fullBody(lm){const ids=[0,11,12,23,24,25,26,27,28];return ids.every(i=>lm[i]&&(lm[i].visibility??1)>.45&&lm[i].x>.03&&lm[i].x<.97&&lm[i].y>.02&&lm[i].y<.98)}
+function bodyY(lm){const ids=[11,12,23,24],p=ids.map(i=>lm[i]).filter(x=>x&&(x.visibility??1)>.45);if(p.length<3)return null;return p.reduce((s,x)=>s+x.y,0)/p.length}
+function reset(){count=0;countEl.textContent="0";baseline=null;ys=[];airborne=false;lastJump=0}
+function update(y){ys.push(y);if(ys.length>20)ys.shift();if(baseline===null&&ys.length>=15){baseline=[...ys].sort((a,b)=>a-b)[Math.floor(ys.length/2)];return}if(baseline===null)return;if(!airborne)baseline=baseline*.985+y*.015;const rise=baseline-y,now=performance.now();if(!airborne&&rise>UP&&now-lastJump>GAP){airborne=true;phaseEl.textContent="점프"}else if(airborne&&rise<DOWN){airborne=false;lastJump=now;if(active){count++;countEl.textContent=count;const w=["하나","둘","셋","넷","다섯"];speak(w[Math.min(count,5)-1],.56);if(count>=5){active=false;startBtn.disabled=false;stopBtn.disabled=true;phaseEl.textContent="완료";setMsg("다섯 번 완료했어요.","통증이 더 심해졌다면 바로 쉬세요.");setTimeout(()=>speak("잘했어요. 오늘도 천천히 했어요.",.68),1200)}}}}
+async function loop(){if(!running)return;if(video.readyState>=2&&landmarker&&video.currentTime!==lastVideo){lastVideo=video.currentTime;const r=landmarker.detectForVideo(video,performance.now());ctx.clearRect(0,0,canvas.width,canvas.height);if(r.landmarks?.length){const lm=r.landmarks[0],d=new DrawingUtils(ctx);d.drawConnectors(lm,PoseLandmarker.POSE_CONNECTIONS,{lineWidth:3});d.drawLandmarks(lm,{radius:2});if(fullBody(lm)){stable=Math.min(stable+1,60);fitEl.textContent="전신 확인됨"}else{stable=0;fitEl.textContent="전신이 화면에 들어오게 해주세요"}if(!active)startBtn.disabled=stable<20;const y=bodyY(lm);if(y!==null){if(active)update(y);else{ys.push(y);if(ys.length>20)ys.shift();if(ys.length>=15)baseline=[...ys].sort((a,b)=>a-b)[Math.floor(ys.length/2)]}}}else{stable=0;startBtn.disabled=true;fitEl.textContent="사람을 찾는 중"}}requestAnimationFrame(loop)}
+function start(){if(stable<20)return;reset();active=true;startBtn.disabled=true;stopBtn.disabled=false;phaseEl.textContent="준비";setMsg("준비됐어요.","다섯 번만 아주 천천히 합니다.");speak("준비됐어요. 다섯 번만 아주 천천히 시작할게요.",.66)}
+function stop(){active=false;startBtn.disabled=false;stopBtn.disabled=true;phaseEl.textContent="중지";speak("멈췄어요. 무리하지 마세요.",.66)}
+cameraBtn.onclick=startCamera;startBtn.onclick=start;stopBtn.onclick=stop;testBtn.onclick=()=>speak("하나. 둘. 셋. 넷. 다섯.",.56);
+</script>
+</body>
+</html>
