@@ -9,6 +9,8 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.speech.tts.TextToSpeech
+import android.webkit.JavascriptInterface
 import android.webkit.PermissionRequest
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -19,20 +21,18 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewClientCompat
+import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
     private var pendingWebPermission: PermissionRequest? = null
+    private var tts: TextToSpeech? = null
 
     private val cameraPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             val request = pendingWebPermission
             if (request != null) {
-                if (granted) {
-                    request.grant(request.resources)
-                } else {
-                    request.deny()
-                }
+                if (granted) request.grant(request.resources) else request.deny()
             }
             pendingWebPermission = null
         }
@@ -44,6 +44,12 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        tts = TextToSpeech(applicationContext) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                tts?.language = Locale.KOREAN
+            }
+        }
+
         requestNotificationPermission()
         requestExactAlarmPermissionIfNeeded()
         AlarmScheduler.scheduleAll(this)
@@ -54,6 +60,7 @@ class MainActivity : AppCompatActivity() {
         webView.settings.mediaPlaybackRequiresUserGesture = false
         webView.settings.allowFileAccess = false
         webView.settings.allowContentAccess = false
+        webView.addJavascriptInterface(NativeBridge(), "AndroidNative")
 
         val assetLoader = WebViewAssetLoader.Builder()
             .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this))
@@ -93,6 +100,16 @@ class MainActivity : AppCompatActivity() {
         webView.loadUrl("https://appassets.androidplatform.net/assets/index.html")
     }
 
+    inner class NativeBridge {
+        @JavascriptInterface
+        fun speak(text: String, rate: Float) {
+            runOnUiThread {
+                tts?.setSpeechRate(rate.coerceIn(0.3f, 1.5f))
+                tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "jump_coach")
+            }
+        }
+    }
+
     private fun requestNotificationPermission() {
         if (
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -109,10 +126,9 @@ class MainActivity : AppCompatActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
             if (!alarmManager.canScheduleExactAlarms()) {
-                val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
                     data = Uri.parse("package:$packageName")
-                }
-                startActivity(intent)
+                })
             }
         }
     }
@@ -124,6 +140,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         webView.destroy()
+        tts?.shutdown()
         super.onDestroy()
     }
 }
